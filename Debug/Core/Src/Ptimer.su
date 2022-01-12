@@ -1,0 +1,4 @@
+Ptimer.c:6:6:SetPTimer	24	static,ignoring_inline_asm
+Ptimer.c:35:6:PTimer	16	static
+Ptimer.c:54:6:InitPTimer	16	static
+Ptimer.c:63:6:KillPTimer	24	static,ignoring_inline_asm
