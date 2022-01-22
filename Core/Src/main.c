@@ -45,6 +45,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart2;
 
@@ -64,8 +65,9 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM1_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
-
+uint8_t Command_read(char str);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -105,6 +107,7 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   MX_TIM1_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   RING_Init(&ring, buff, sizeof(buff) / sizeof(buff[0])); // Initialize UART receiver ring buffer.
   sprintf((char*)tstring,"\r\nEnter command:\n\r"
@@ -121,17 +124,14 @@ int main(void)
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
   InitPTimer();
-  //SetPTimer(NewNumber, NewTime)
+  HAL_TIM_Base_Start_IT(&htim2);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-		HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
-		HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_2);
-		HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_3);
-		switch(flag_btn)
+	    switch(flag_btn)
 		{
 			case 0:
 				TIM1->CCR1 = 0;
@@ -174,52 +174,76 @@ int main(void)
 				TIM1->CCR3 = brightness;
 				break;
 		}
-		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
-		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
 
-		/*
-		if(flag_irq && (HAL_GetTick() - time_irq) > 200)
+		if(ptimerFlags.timer == (1<<3))
 		{
 			__HAL_GPIO_EXTI_CLEAR_IT(BTN1_Pin);
 			NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
 			HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-
-			flag_irq = 0;
+			ptimerFlags.timer &= ~(1<<3);
+			//flag_irq = 0;
 			flag_btn++;
 			if (flag_btn > 7) flag_btn = 0;
-		}*/
+		}
 		if (Ring_GetMessage(&ring, rstring))
 		{
+			uint8_t buf, buf_;
 			sscanf((char*)rstring,"%s", string);
-			for (int i = 0; i < 3; i++)
+			buf = Command_read(string[0]);
+			switch(buf)
 			{
-				str[i] = string[i+2];
-			}
-			if (str[1] == '\r' || str[1] == '\n' || str[1] == '\0')
-			{
-				brightness = ((int) str[0]) - 48;
-				flag_err = 1;
-			}
-			else if (str[2] == '\r' || str[2] == '\n' || str[2] == '\0')
-			{
-				brightness = ((((int) str[0]) - 48) * 10) + (((int) str[1]) - 48);
-				flag_err = 1;
-			}
-			else
-			{
-				flag_err = 2;
+			case 11:
+				buf = Command_read(string[1]);
+				switch(buf)
+				{
+				case 10:
+					for (int i = 0; i < 3; i++)
+					{
+						str[i] = string[i+2];
+					}
+					if (str[1] == '\r' || str[1] == '\n' || str[1] == '\0')
+					{
+						buf = Command_read(str[0]);
+						if ((buf != 12) && (buf != 11) && (buf != 10))
+						{
+							brightness = buf; flag_err = 1;
+						}
+						else
+						{
+							flag_err = 2; break;
+						}
+					}
+					else if (str[2] == '\r' || str[2] == '\n' || str[2] == '\0')
+					{
+						buf = Command_read(str[0]);
+						buf_ = buf;
+						buf = Command_read(str[1]);
+						if ((buf != 12) && (buf != 11) && (buf != 10) && (buf_ != 11) && (buf_ != 12) && (buf_ != 10))
+						{
+							brightness = (buf_ * 10) + buf; flag_err = 1;
+						}
+						else
+						{
+							flag_err = 2; break;
+						}
+					}
+					break;
+				case 12: flag_err = 2; break;
+				}
+				break;
+			case 12: flag_err = 2; break;
 			}
 			RING_Clear(&ring);
-			if ((string[0] == 'L' || string[0] == 'l') && (string[1] == '=') && (flag_err == 1))
+			switch(flag_err)
 			{
+			case 1:
 				sprintf((char*)tstring,"\n\rEcho: %s\n\r"
 							  "Enter command 'L=xx' or 'l=xx'\r\n",string);
-			}
-			else
-			{
+				break;
+			case 2:
 				sprintf((char*)tstring,"\n\rEcho: Wrong command!!!\r\n"
 							  "Enter command 'L=xx' or 'l=xx'\r\n");
+				break;
 			}
 			HAL_UART_Transmit_IT(&huart2,tstring,strlen((char*)tstring));
 			flag_err = 0;
@@ -349,6 +373,51 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 7200-1;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 10-1;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -398,7 +467,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : BTN1_Pin */
   GPIO_InitStruct.Pin = BTN1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(BTN1_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
@@ -418,7 +487,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		// Set the overrun flag if the message is longer than ring buffer can hold
 		if (ring.idxOut == ring.idxIn) ring.flag.BufferOverrun = 1;
 		// Set the message ready flag if the end of line character has been received
-		if ((ring.buffer[ring.idxIn -1] == '\r') || (ring.buffer[ring.idxOut -1] == '\n'))
+		if ((ring.buffer[ring.idxOut -1] == '\r') || (ring.buffer[ring.idxOut -1] == '\n'))
 			ring.flag.MessageReady = 1;
 		// Receive the next character from UART in non blocking mode
 		HAL_UART_Receive_IT(&huart2,&ring.buffer[ring.idxOut],1);
@@ -432,12 +501,42 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		//flag_irq = 1;
 		//time_irq = HAL_GetTick();
 		SetPTimer(3, 200);
-		flag_btn++;
+		/*flag_btn++;
 		if (flag_btn > 7) flag_btn = 0;
 		__HAL_GPIO_EXTI_CLEAR_IT(BTN1_Pin);
 		NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
-		HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+		HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);*/
 	}
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+	if (htim == &htim2)
+	{
+		PTimer();
+	}
+}
+
+uint8_t Command_read(char str)
+{
+	uint8_t ret = 12;
+	switch(str)
+	{
+		case 'L':	ret = 11; break;
+		case 'l':	ret = 11; break;
+		case '=':	ret = 10; break;
+		case '0':	ret = 0; break;
+		case '1':	ret = 1; break;
+		case '2':	ret = 2; break;
+		case '3':	ret = 3; break;
+		case '4':	ret = 4; break;
+		case '5':	ret = 5; break;
+		case '6':	ret = 6; break;
+		case '7':	ret = 7; break;
+		case '8':	ret = 8; break;
+		case '9':	ret = 9; break;
+	}
+	return ret;
 }
 /* USER CODE END 4 */
 
@@ -473,4 +572,3 @@ void assert_failed(uint8_t *file, uint32_t line)
 }
 #endif /* USE_FULL_ASSERT */
 
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
